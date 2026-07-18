@@ -1,8 +1,10 @@
 /** Classical major aspects from ecliptic longitudes. Pure functions only. */
 
 import type { Sample } from './positions';
+import { positionsAt, addDays } from './positions';
 
 export type Kind = 'conjunction' | 'sextile' | 'square' | 'trine' | 'opposition';
+export type Motion = 'applying' | 'separating' | 'exact';
 
 export interface KindSpec {
   kind: Kind;
@@ -29,6 +31,7 @@ export interface Hit {
   separation: number;
   orb: number;
   tightness: number;
+  motion: Motion;
 }
 
 export function shortestArc(a: number, b: number): number {
@@ -37,12 +40,19 @@ export function shortestArc(a: number, b: number): number {
   return d;
 }
 
+function lonOf(samples: Sample[], id: string): number | null {
+  const s = samples.find((x) => x.id === id);
+  return s ? s.lon : null;
+}
+
 export function findAspects(
   samples: Sample[],
   enabled: ReadonlySet<Kind>,
+  when?: Date,
 ): Hit[] {
   const active = KINDS.filter((k) => enabled.has(k.kind));
   const hits: Hit[] = [];
+  const future = when ? positionsAt(addDays(when, 1)) : null;
 
   for (let i = 0; i < samples.length; i++) {
     for (let j = i + 1; j < samples.length; j++) {
@@ -53,6 +63,19 @@ export function findAspects(
       for (const spec of active) {
         const orb = Math.abs(sep - spec.degrees);
         if (orb <= spec.orb) {
+          let motion: Motion = 'exact';
+          if (future) {
+            const fa = lonOf(future, a.id);
+            const fb = lonOf(future, b.id);
+            if (fa !== null && fb !== null) {
+              const nextSep = shortestArc(fa, fb);
+              const nextOrb = Math.abs(nextSep - spec.degrees);
+              if (nextOrb < orb - 0.01) motion = 'applying';
+              else if (nextOrb > orb + 0.01) motion = 'separating';
+              else motion = 'exact';
+            }
+          }
+
           hits.push({
             kind: spec.kind,
             aId: a.id,
@@ -62,6 +85,7 @@ export function findAspects(
             separation: sep,
             orb,
             tightness: 1 - orb / spec.orb,
+            motion,
           });
         }
       }

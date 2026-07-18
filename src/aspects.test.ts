@@ -46,4 +46,14 @@ describe('findAspects', () => {
     );
     expect(hits).toHaveLength(1);
   });
+
+  it('includes moon and pluto ids in graph when present', () => {
+    const hits = findAspects(
+      [s('moon', 'Moon', 0), s('pluto', 'Pluto', 90)],
+      new Set(['square']),
+    );
+    expect(hits).toHaveLength(1);
+    expect(hits[0].aLabel).toBe('Moon');
+    expect(hits[0].bLabel).toBe('Pluto');
+  });
 });

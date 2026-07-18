@@ -17,4 +17,4 @@
 ## Product
 
 - Plan: Chad / Hermes · 2026-07-17  
-- Build: fresh walking skeleton · no prior Solarium code reused
+- Build: from-scratch skeleton, then Moon/Pluto + scrub + focus fatten

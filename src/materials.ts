@@ -1,4 +1,4 @@
-/** Canvas-generated surfaces — no network, no third-party texture packs. */
+/** Canvas-generated surfaces — no network texture packs. */
 import * as THREE from 'three';
 
 function hash(x: number, y: number): number {
@@ -10,7 +10,7 @@ function fbm(x: number, y: number): number {
   let v = 0;
   let a = 0.5;
   let f = 1;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 6; i++) {
     v += a * hash(x * f, y * f);
     a *= 0.5;
     f *= 2.05;
@@ -23,11 +23,9 @@ function rgb(hex: string): [number, number, number] {
   return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)];
 }
 
-export function planetMap(
-  hex: string,
-  mode: 'rocky' | 'gas' | 'ice' | 'sun' = 'rocky',
-  size = 512,
-): THREE.CanvasTexture {
+export type SurfaceMode = 'rocky' | 'gas' | 'ice' | 'sun' | 'moon';
+
+export function planetMap(hex: string, mode: SurfaceMode = 'rocky', size = 512): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = size;
   canvas.height = size;
@@ -40,26 +38,44 @@ export function planetMap(
       const u = x / size;
       const v = y / size;
       let n = fbm(u * 7, v * 5);
+      const i = (y * size + x) * 4;
 
       if (mode === 'gas') {
-        n = 0.5 * n + 0.5 * (0.5 + 0.5 * Math.sin(v * Math.PI * 16 + n * 4));
+        n = 0.45 * n + 0.55 * (0.5 + 0.5 * Math.sin(v * Math.PI * 18 + n * 4));
       } else if (mode === 'ice') {
-        n = 0.35 + 0.65 * n;
+        n = 0.3 + 0.7 * n;
+      } else if (mode === 'moon') {
+        // crater-ish dark spots
+        const crater = Math.max(0, 0.55 - fbm(u * 14, v * 14));
+        n = 0.55 + 0.35 * n - crater * 0.35;
       } else if (mode === 'sun') {
-        n = 0.55 + 0.45 * n;
+        img.data[i] = Math.min(255, 205 + 50 * n);
+        img.data[i + 1] = Math.min(255, 125 + 75 * n);
+        img.data[i + 2] = Math.min(255, 30 + 45 * n);
+        img.data[i + 3] = 255;
+        continue;
       }
 
-      const k = 0.62 + 0.48 * n;
-      const i = (y * size + x) * 4;
-      if (mode === 'sun') {
-        img.data[i] = Math.min(255, 210 + 45 * n);
-        img.data[i + 1] = Math.min(255, 130 + 70 * n);
-        img.data[i + 2] = Math.min(255, 35 + 40 * n);
-      } else {
-        img.data[i] = Math.min(255, br * k);
-        img.data[i + 1] = Math.min(255, bg * k);
-        img.data[i + 2] = Math.min(255, bb * k);
+      // Earth-ish blue oceans when base is earth blue
+      if (hex.toLowerCase() === '#3a6ea5') {
+        const land = n > 0.52;
+        if (land) {
+          img.data[i] = 55 + 40 * n;
+          img.data[i + 1] = 90 + 50 * n;
+          img.data[i + 2] = 45 + 30 * n;
+        } else {
+          img.data[i] = 30 + 25 * n;
+          img.data[i + 1] = 70 + 40 * n;
+          img.data[i + 2] = 130 + 50 * n;
+        }
+        img.data[i + 3] = 255;
+        continue;
       }
+
+      const k = 0.58 + 0.52 * n;
+      img.data[i] = Math.min(255, br * k);
+      img.data[i + 1] = Math.min(255, bg * k);
+      img.data[i + 2] = Math.min(255, bb * k);
       img.data[i + 3] = 255;
     }
   }
@@ -86,11 +102,12 @@ export function ringMap(size = 256): THREE.CanvasTexture {
       if (r < 0.54 || r > 0.98) {
         img.data[i + 3] = 0;
       } else {
-        const band = 0.5 + 0.5 * Math.sin(r * 90);
+        const band = 0.5 + 0.5 * Math.sin(r * 95);
+        const gap = Math.abs(r - 0.78) < 0.02 ? 0.15 : 1;
         img.data[i] = 200;
         img.data[i + 1] = 188;
         img.data[i + 2] = 155;
-        img.data[i + 3] = (0.3 + 0.5 * band) * 255;
+        img.data[i + 3] = (0.28 + 0.52 * band) * 255 * gap;
       }
     }
   }

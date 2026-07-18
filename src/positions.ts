@@ -17,6 +17,7 @@ export interface Sample {
 
 const ENG: Record<string, Astro.Body> = {
   Sun: Astro.Body.Sun,
+  Moon: Astro.Body.Moon,
   Mercury: Astro.Body.Mercury,
   Venus: Astro.Body.Venus,
   Mars: Astro.Body.Mars,
@@ -24,6 +25,7 @@ const ENG: Record<string, Astro.Body> = {
   Saturn: Astro.Body.Saturn,
   Uranus: Astro.Body.Uranus,
   Neptune: Astro.Body.Neptune,
+  Pluto: Astro.Body.Pluto,
 };
 
 function wrap360(deg: number): number {
@@ -53,4 +55,11 @@ export function positionsAt(when: Date): Sample[] {
   }
 
   return out;
+}
+
+/** Shift a date by whole days (UTC calendar). */
+export function addDays(when: Date, days: number): Date {
+  const d = new Date(when.getTime());
+  d.setUTCDate(d.getUTCDate() + days);
+  return d;
 }

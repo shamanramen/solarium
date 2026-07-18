@@ -136,6 +136,79 @@ body {
   display: flex;
   gap: 0.4rem;
   margin-bottom: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.actions.tight {
+  margin-bottom: 0.55rem;
+}
+
+.actions.tight button {
+  padding: 0.3rem 0.45rem;
+  font-size: 0.72rem;
+}
+
+.field.scrub {
+  margin-top: 0.55rem;
+}
+
+.field.scrub input[type='range'] {
+  width: 100%;
+  accent-color: oklch(0.72 0.1 85);
+  cursor: pointer;
+}
+
+.focus-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.45rem;
+}
+
+.focus-chip {
+  font-family: var(--ui);
+  font-size: 0.72rem;
+  font-weight: 500;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.28rem 0.45rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.focus-chip:hover {
+  color: var(--ink);
+  border-color: oklch(0.5 0.02 250);
+}
+
+.focus-chip.active {
+  color: var(--ink);
+  border-color: oklch(0.55 0.08 85 / 0.55);
+  background: oklch(0.28 0.04 85 / 0.3);
+}
+
+#focus-detail {
+  margin: 0.2rem 0 0;
+  color: var(--muted);
+  line-height: 1.35;
+}
+
+.aspect-detail {
+  margin-top: 0.65rem;
+  padding: 0.55rem 0.6rem;
+  border: 1px solid oklch(0.55 0.08 85 / 0.35);
+  border-radius: 3px;
+  background: oklch(0.16 0.014 250 / 0.7);
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.8rem;
+}
+
+.aspect-detail strong {
+  font-weight: 500;
+  color: var(--ink);
 }
 
 button {
@@ -275,6 +348,17 @@ button.quiet:hover {
   padding: 0.26rem 0;
   border-bottom: 1px solid oklch(0.28 0.012 250 / 0.4);
   color: var(--muted);
+  cursor: pointer;
+  border-radius: 2px;
+}
+
+.hits li:hover {
+  background: oklch(0.22 0.014 250 / 0.45);
+}
+
+.hits li:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 1px;
 }
 
 .hits .dot {

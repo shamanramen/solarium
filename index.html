@@ -35,18 +35,42 @@
             <button type="button" id="jump-now">Now</button>
             <button type="button" id="jump-squares" class="quiet">Squares demo</button>
           </div>
+          <div class="actions tight">
+            <button type="button" id="step-back-month" class="quiet" title="−1 month">−1m</button>
+            <button type="button" id="step-back-day" class="quiet" title="−1 day">−1d</button>
+            <button type="button" id="step-fwd-day" class="quiet" title="+1 day">+1d</button>
+            <button type="button" id="step-fwd-month" class="quiet" title="+1 month">+1m</button>
+          </div>
           <label class="field">
             <span>UTC</span>
             <input id="when" type="datetime-local" />
+          </label>
+          <label class="field scrub">
+            <span>Scrub ±1 year from anchor</span>
+            <input id="scrub" type="range" min="-365" max="365" value="0" step="1" />
           </label>
           <p class="mono muted" id="when-display">—</p>
         </section>
 
         <section>
+          <h2>Focus</h2>
+          <p class="muted small">Click a body, or pick below</p>
+          <div id="focus-list" class="focus-list" role="listbox" aria-label="Focus body"></div>
+          <p class="mono small" id="focus-detail">—</p>
+        </section>
+
+        <section>
           <h2>Aspects</h2>
-          <p class="muted small">Orb 6° · majors</p>
+          <p class="muted small">Orb 6° · majors · applying/separating</p>
+          <div class="actions tight">
+            <button type="button" id="aspects-all" class="quiet">All</button>
+            <button type="button" id="aspects-none" class="quiet">None</button>
+            <button type="button" id="aspects-hard" class="quiet">Hard</button>
+            <button type="button" id="aspects-soft" class="quiet">Soft</button>
+          </div>
           <div id="aspect-switches" class="switches" role="group" aria-label="Aspect filters"></div>
           <ul id="aspect-hits" class="hits" aria-live="polite"></ul>
+          <div id="aspect-detail" class="aspect-detail" hidden></div>
         </section>
 
         <section>
@@ -56,8 +80,8 @@
       </aside>
 
       <footer class="chrome bottom">
-        <p>Drag orbit · scroll zoom · <span id="fps" class="mono">—</span></p>
-        <p class="muted small">Fresh skeleton · NASA textures next · <a href="./CREDITS.md">credits</a></p>
+        <p>Drag orbit · scroll zoom · click body · <span id="fps" class="mono">—</span></p>
+        <p class="muted small">Moon + Pluto · scrub · focus · <a href="./CREDITS.md">credits</a></p>
       </footer>
 
       <div id="no-webgl" class="blocker" hidden>
