@@ -7,7 +7,7 @@ import { CATALOG, type BodyId } from './catalog';
 import { KINDS, findAspects, type Hit, type Kind } from './aspects';
 import { addDays, positionsAt } from './positions';
 import { formatLon } from './zodiac';
-import { createWorld } from './world';
+import { createWorld, type ViewMode } from './world';
 
 const SQUARE_SEED = '2020-01-20T12:00:00.000Z';
 
@@ -57,6 +57,10 @@ function boot(): void {
   const focusList = document.getElementById('focus-list')!;
   const focusDetail = document.getElementById('focus-detail')!;
   const aspectDetail = document.getElementById('aspect-detail')!;
+  const frameLabel = document.getElementById('frame-label')!;
+  const viewHint = document.getElementById('view-hint')!;
+  const btnOrrery = document.getElementById('view-orrery') as HTMLButtonElement;
+  const btnSky = document.getElementById('view-sky') as HTMLButtonElement;
 
   // Focus buttons
   for (const body of CATALOG) {
@@ -109,6 +113,23 @@ function boot(): void {
     bar.style.borderTopColor = spec.color;
     li.append(bar, document.createTextNode(spec.label));
     legend.append(li);
+  }
+
+  function setView(mode: ViewMode): void {
+    world.setViewMode(mode);
+    const sky = mode === 'sky';
+    btnOrrery.classList.toggle('active', !sky);
+    btnSky.classList.toggle('active', sky);
+    btnOrrery.setAttribute('aria-pressed', String(!sky));
+    btnSky.setAttribute('aria-pressed', String(sky));
+    frameLabel.textContent = sky
+      ? 'from Earth · sky directions · ecliptic'
+      : 'geocentric · aspects · readable scale';
+    viewHint.textContent = sky
+      ? 'True geo directions on the celestial sphere · camera starts above the north ecliptic pole'
+      : 'Readable rings · top-down solar system';
+    // re-paint positions/aspects for new layout
+    paint();
   }
 
   function setFocus(id: BodyId | null): void {
@@ -231,6 +252,9 @@ function boot(): void {
     paint();
   }
 
+  btnOrrery.addEventListener('click', () => setView('orrery'));
+  btnSky.addEventListener('click', () => setView('sky'));
+
   document.getElementById('jump-now')!.addEventListener('click', () => {
     setWhen(new Date(), true);
   });
@@ -297,6 +321,8 @@ function boot(): void {
     setWhen: (d: Date) => setWhen(d, true),
     samples: () => positionsAt(when),
     hits: () => lastHits,
+    view: () => world.getViewMode(),
+    setView,
   };
 }
 

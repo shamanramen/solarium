@@ -132,6 +132,45 @@ body {
   color: var(--gold-dim);
 }
 
+.view-toggle {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.35rem;
+  margin-bottom: 0.45rem;
+}
+
+.view-btn {
+  font-family: var(--ui);
+  font-size: 0.8rem;
+  font-weight: 500;
+  border: 1px solid var(--edge);
+  background: transparent;
+  color: var(--muted);
+  padding: 0.42rem 0.5rem;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.view-btn:hover {
+  color: var(--ink);
+  border-color: oklch(0.5 0.02 250);
+}
+
+.view-btn.active {
+  color: var(--ink);
+  border-color: oklch(0.55 0.08 85 / 0.55);
+  background: oklch(0.28 0.04 85 / 0.3);
+}
+
+.view-btn:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+#view-hint {
+  margin: 0;
+}
+
 .actions {
   display: flex;
   gap: 0.4rem;

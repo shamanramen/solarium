@@ -30,6 +30,21 @@
 
       <aside class="chrome panel" aria-label="Solarium controls">
         <section>
+          <h2>View</h2>
+          <div class="view-toggle" role="group" aria-label="View mode">
+            <button type="button" id="view-orrery" class="view-btn active" aria-pressed="true">
+              Orrery
+            </button>
+            <button type="button" id="view-sky" class="view-btn" aria-pressed="false">
+              From Earth
+            </button>
+          </div>
+          <p class="muted small" id="view-hint">
+            Readable rings · top-down solar system
+          </p>
+        </section>
+
+        <section>
           <h2>Time</h2>
           <div class="actions">
             <button type="button" id="jump-now">Now</button>
@@ -81,7 +96,7 @@
 
       <footer class="chrome bottom">
         <p>Drag orbit · scroll zoom · click body · <span id="fps" class="mono">—</span></p>
-        <p class="muted small">Moon + Pluto · scrub · focus · <a href="./CREDITS.md">credits</a></p>
+        <p class="muted small">Orrery / Earth sky · <a href="./CREDITS.md">credits</a></p>
       </footer>
 
       <div id="no-webgl" class="blocker" hidden>
