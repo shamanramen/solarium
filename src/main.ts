@@ -1,11 +1,16 @@
 /**
- * Solarium — fattened skeleton.
- * Moon/Pluto, time scrub, body focus, aspect motion + detail.
+ * Solarium — orrery, sky map (from above), night sky (standing on Earth).
  */
 import './ui.css';
 import { CATALOG, type BodyId } from './catalog';
 import { KINDS, findAspects, type Hit, type Kind } from './aspects';
 import { addDays, positionsAt } from './positions';
+import {
+  DEFAULT_OBSERVER,
+  PRESETS,
+  horizonAt,
+  type GeoObserver,
+} from './horizon';
 import { formatLon } from './zodiac';
 import { createWorld, type ViewMode } from './world';
 
@@ -46,6 +51,8 @@ function boot(): void {
   let focusId: BodyId | null = null;
   let lastHits: Hit[] = [];
   let lastSamples = positionsAt(when);
+  let observer: GeoObserver = { ...DEFAULT_OBSERVER };
+  let viewMode: ViewMode = 'orrery';
 
   const whenInput = document.getElementById('when') as HTMLInputElement;
   const scrub = document.getElementById('scrub') as HTMLInputElement;
@@ -53,16 +60,35 @@ function boot(): void {
   const switches = document.getElementById('aspect-switches')!;
   const hitsEl = document.getElementById('aspect-hits')!;
   const legend = document.getElementById('aspect-legend')!;
-  const fpsEl = document.getElementById('fps')!;
   const focusList = document.getElementById('focus-list')!;
   const focusDetail = document.getElementById('focus-detail')!;
   const aspectDetail = document.getElementById('aspect-detail')!;
   const frameLabel = document.getElementById('frame-label')!;
   const viewHint = document.getElementById('view-hint')!;
+  const controlsHint = document.getElementById('controls-hint')!;
+  const observerFields = document.getElementById('observer-fields')!;
+  const obsLat = document.getElementById('obs-lat') as HTMLInputElement;
+  const obsLon = document.getElementById('obs-lon') as HTMLInputElement;
+  const obsReadout = document.getElementById('obs-readout')!;
+  const placePresets = document.getElementById('place-presets')!;
   const btnOrrery = document.getElementById('view-orrery') as HTMLButtonElement;
-  const btnSky = document.getElementById('view-sky') as HTMLButtonElement;
+  const btnSkymap = document.getElementById('view-skymap') as HTMLButtonElement;
+  const btnNight = document.getElementById('view-night') as HTMLButtonElement;
 
-  // Focus buttons
+  for (const p of PRESETS) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'quiet';
+    b.textContent = p.label;
+    b.addEventListener('click', () => {
+      observer = { ...p.observer };
+      obsLat.value = String(observer.lat);
+      obsLon.value = String(observer.lon);
+      paint();
+    });
+    placePresets.append(b);
+  }
+
   for (const body of CATALOG) {
     const btn = document.createElement('button');
     btn.type = 'button';
@@ -116,19 +142,36 @@ function boot(): void {
   }
 
   function setView(mode: ViewMode): void {
+    viewMode = mode;
     world.setViewMode(mode);
-    const sky = mode === 'sky';
-    btnOrrery.classList.toggle('active', !sky);
-    btnSky.classList.toggle('active', sky);
-    btnOrrery.setAttribute('aria-pressed', String(!sky));
-    btnSky.setAttribute('aria-pressed', String(sky));
-    frameLabel.textContent = sky
-      ? 'from Earth · sky directions · ecliptic'
-      : 'geocentric · aspects · readable scale';
-    viewHint.textContent = sky
-      ? 'True geo directions on the celestial sphere · camera starts above the north ecliptic pole'
-      : 'Readable rings · top-down solar system';
-    // re-paint positions/aspects for new layout
+    btnOrrery.classList.toggle('active', mode === 'orrery');
+    btnSkymap.classList.toggle('active', mode === 'skymap');
+    btnNight.classList.toggle('active', mode === 'night');
+    btnOrrery.setAttribute('aria-pressed', String(mode === 'orrery'));
+    btnSkymap.setAttribute('aria-pressed', String(mode === 'skymap'));
+    btnNight.setAttribute('aria-pressed', String(mode === 'night'));
+
+    observerFields.hidden = mode !== 'night';
+
+    if (mode === 'night') {
+      frameLabel.textContent = 'standing on Earth · local night sky · alt/az';
+      viewHint.textContent =
+        'Look around as if outside · drag to pan · scroll FOV · N/E/S/W on horizon';
+      controlsHint.innerHTML =
+        'Drag look · scroll FOV · click body · <span id="fps" class="mono">—</span>';
+    } else if (mode === 'skymap') {
+      frameLabel.textContent = 'from Earth · sky map · north ecliptic pole';
+      viewHint.textContent =
+        'Celestial sphere by true geo lon/lat · looking down from above';
+      controlsHint.innerHTML =
+        'Drag orbit · scroll zoom · click body · <span id="fps" class="mono">—</span>';
+    } else {
+      frameLabel.textContent = 'geocentric · aspects · readable scale';
+      viewHint.textContent = 'Readable rings · top-down solar system';
+      controlsHint.innerHTML =
+        'Drag orbit · scroll zoom · click body · <span id="fps" class="mono">—</span>';
+    }
+
     paint();
   }
 
@@ -144,8 +187,16 @@ function boot(): void {
 
   function updateFocusDetail(): void {
     if (!focusId) {
-      focusDetail.textContent = 'Full system view';
+      focusDetail.textContent =
+        viewMode === 'night' ? 'Looking around the local sky' : 'Full system view';
       return;
+    }
+    if (viewMode === 'night') {
+      const h = horizonAt(when, observer).find((x) => x.id === focusId);
+      if (h) {
+        focusDetail.textContent = `${h.label} · alt ${h.alt.toFixed(1)}° · az ${h.az.toFixed(1)}° · ${formatLon(h.lon)}`;
+        return;
+      }
     }
     const s = lastSamples.find((x) => x.id === focusId);
     if (!s) {
@@ -181,9 +232,23 @@ function boot(): void {
     paint();
   }
 
+  function readObserver(): void {
+    const lat = Number(obsLat.value);
+    const lon = Number(obsLon.value);
+    if (!Number.isNaN(lat) && !Number.isNaN(lon)) {
+      observer = {
+        lat: Math.max(-90, Math.min(90, lat)),
+        lon: Math.max(-180, Math.min(180, lon)),
+        heightM: observer.heightM,
+      };
+    }
+  }
+
   function paint(): void {
+    readObserver();
     lastSamples = positionsAt(when);
-    world.place(lastSamples);
+    const horizon = viewMode === 'night' ? horizonAt(when, observer) : [];
+    world.place(lastSamples, horizon);
     lastHits = findAspects(lastSamples, enabled, when);
     world.drawAspects(lastHits, enabled);
 
@@ -194,6 +259,11 @@ function boot(): void {
     if (document.activeElement !== scrub) {
       const days = Math.round((when.getTime() - anchor.getTime()) / 86_400_000);
       scrub.value = String(Math.max(-365, Math.min(365, days)));
+    }
+
+    if (viewMode === 'night') {
+      const up = horizon.filter((h) => h.aboveHorizon).length;
+      obsReadout.textContent = `${observer.lat.toFixed(2)}°N  ${observer.lon.toFixed(2)}°E · ${up} bodies above horizon`;
     }
 
     hitsEl.replaceChildren();
@@ -214,7 +284,6 @@ function boot(): void {
       li.append(dot, pair, orb);
       li.addEventListener('click', () => {
         showHitDetail(hit);
-        // focus first body of aspect
         setFocus(hit.aId as BodyId);
       });
       hitsEl.append(li);
@@ -253,7 +322,11 @@ function boot(): void {
   }
 
   btnOrrery.addEventListener('click', () => setView('orrery'));
-  btnSky.addEventListener('click', () => setView('sky'));
+  btnSkymap.addEventListener('click', () => setView('skymap'));
+  btnNight.addEventListener('click', () => setView('night'));
+
+  obsLat.addEventListener('change', () => paint());
+  obsLon.addEventListener('change', () => paint());
 
   document.getElementById('jump-now')!.addEventListener('click', () => {
     setWhen(new Date(), true);
@@ -293,7 +366,6 @@ function boot(): void {
   });
 
   canvas.addEventListener('pointerdown', (e) => {
-    // ignore if user is orbiting (moved) — simple pick on short click
     const startX = e.clientX;
     const startY = e.clientY;
     const onUp = (up: PointerEvent) => {
@@ -311,7 +383,8 @@ function boot(): void {
 
   function loop(): void {
     world.tick();
-    fpsEl.textContent = `${world.fps()} fps`;
+    const fps = document.getElementById('fps');
+    if (fps) fps.textContent = `${world.fps()} fps`;
     requestAnimationFrame(loop);
   }
   requestAnimationFrame(loop);
@@ -320,9 +393,11 @@ function boot(): void {
     when: () => when,
     setWhen: (d: Date) => setWhen(d, true),
     samples: () => positionsAt(when),
+    horizon: () => horizonAt(when, observer),
     hits: () => lastHits,
     view: () => world.getViewMode(),
     setView,
+    observer: () => observer,
   };
 }
 

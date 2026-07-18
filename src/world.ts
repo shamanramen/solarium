@@ -1,30 +1,34 @@
 /**
- * Three.js world:
- * - Orrery: readable rings by geocentric longitude
- * - Earth sky: bodies on the celestial sphere by true geo lon/lat
- *   (default camera: looking down from above the north ecliptic pole)
+ * Three.js world — three view modes:
+ * 1. orrery  — readable rings by geocentric longitude
+ * 2. skymap  — celestial sphere, look down from north ecliptic pole
+ * 3. night   — standing on Earth, look around the real local sky (alt/az)
  */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { CATALOG, type BodyId } from './catalog';
 import { colorFor, type Hit, type Kind } from './aspects';
 import type { Sample } from './positions';
+import type { HorizonSample } from './horizon';
 import { planetMap, ringMap } from './materials';
 import { formatLonShort } from './zodiac';
 
 const D2R = Math.PI / 180;
-/** Celestial sphere radius for Earth-sky mode. */
 const SKY_R = 72;
+const NIGHT_R = 80;
 
-export type ViewMode = 'orrery' | 'sky';
+export type ViewMode = 'orrery' | 'skymap' | 'night';
 
 export interface World {
-  place(samples: Sample[]): void;
+  place(samples: Sample[], horizon?: HorizonSample[]): void;
   drawAspects(hits: Hit[], enabled: ReadonlySet<Kind>): void;
   setViewMode(mode: ViewMode): void;
   getViewMode(): ViewMode;
   focusBody(id: BodyId | null): void;
   pick(clientX: number, clientY: number): BodyId | null;
+  /** Night-sky look angles (yaw around vertical, pitch up/down). */
+  getLook(): { yaw: number; pitch: number };
+  setLook(yaw: number, pitch: number): void;
   resize(): void;
   tick(): void;
   dispose(): void;
@@ -48,7 +52,7 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   scene.background = new THREE.Color('#080a0e');
   scene.fog = new THREE.FogExp2('#080a0e', 0.0038);
 
-  const camera = new THREE.PerspectiveCamera(42, 1, 0.1, 600);
+  const camera = new THREE.PerspectiveCamera(42, 1, 0.05, 600);
   camera.position.set(0, 48, 105);
 
   const controls = new OrbitControls(camera, canvas);
@@ -69,33 +73,43 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   rim.position.set(0, -20, 40);
   scene.add(rim);
 
+  // Soft up-light for night sky (milky ambient)
+  const nightHemi = new THREE.HemisphereLight('#1a2438', '#050608', 0.35);
+  nightHemi.visible = false;
+  scene.add(nightHemi);
+
   scene.add(starfield());
 
   // Orrery guides
   const orreryGuides = new THREE.Group();
-  orreryGuides.name = 'orreryGuides';
   orreryGuides.add(goldRing(98));
   for (const b of CATALOG) {
     if (b.ring > 0) orreryGuides.add(guideRing(b.ring));
   }
   scene.add(orreryGuides);
 
-  // Sky guides: dome grid + ecliptic + zodiac ticks
-  const skyGuides = new THREE.Group();
-  skyGuides.name = 'skyGuides';
-  skyGuides.visible = false;
-  skyGuides.add(skyDome(SKY_R));
-  skyGuides.add(goldRing(SKY_R));
-  skyGuides.add(meridianRing(SKY_R));
-  for (const tick of zodiacTicks(SKY_R)) skyGuides.add(tick);
-  scene.add(skyGuides);
+  // Sky-map guides (ecliptic sphere)
+  const skymapGuides = new THREE.Group();
+  skymapGuides.visible = false;
+  skymapGuides.add(skyDome(SKY_R));
+  skymapGuides.add(goldRing(SKY_R));
+  for (const tick of zodiacTicks(SKY_R)) skymapGuides.add(tick);
+  scene.add(skymapGuides);
+
+  // Night-sky guides (local horizon)
+  const nightGuides = new THREE.Group();
+  nightGuides.visible = false;
+  nightGuides.add(groundDisc(NIGHT_R * 1.2));
+  nightGuides.add(horizonRing(NIGHT_R));
+  nightGuides.add(cardinalLabels(NIGHT_R));
+  nightGuides.add(altitudeArcs(NIGHT_R));
+  scene.add(nightGuides);
 
   const nodes = new Map<BodyId, THREE.Object3D>();
   const meshes = new Map<BodyId, THREE.Mesh>();
   const labels = new Map<BodyId, THREE.Sprite>();
   const anchors = new Map<string, THREE.Vector3>();
   const pickables: THREE.Object3D[] = [];
-  /** Base mesh radius from catalog (for restore after sky scaling). */
   const baseSize = new Map<BodyId, number>();
 
   for (const spec of CATALOG) {
@@ -157,7 +171,6 @@ export function createWorld(canvas: HTMLCanvasElement): World {
         }),
       );
       ring.rotation.x = Math.PI / 2.12;
-      ring.name = 'saturn-rings';
       group.add(ring);
     }
 
@@ -168,7 +181,6 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     nodes.set(spec.id, group);
 
     const spr = nameSprite(spec.label);
-    spr.position.set(group.position.x, spec.size + 1.15, group.position.z);
     scene.add(spr);
     labels.set(spec.id, spr);
   }
@@ -181,6 +193,7 @@ export function createWorld(canvas: HTMLCanvasElement): World {
 
   let mode: ViewMode = 'orrery';
   let lastSamples: Sample[] = [];
+  let lastHorizon: HorizonSample[] = [];
   let lastHits: Hit[] = [];
   let lastEnabled: ReadonlySet<Kind> = new Set();
   let focusId: BodyId | null = null;
@@ -191,7 +204,10 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   let bloom = 1;
   let bloomGoal = 1;
 
-  /** Orrery layout: fake radius, real lon (lat lightly exaggerated). */
+  // Night-sky first-person look (yaw around Y, pitch around X)
+  let lookYaw = 0; // 0 = looking north (−Z)
+  let lookPitch = 0.35; // slightly up
+
   function orreryPoint(lonDeg: number, radius: number, latDeg: number): THREE.Vector3 {
     const a = lonDeg * D2R;
     return new THREE.Vector3(
@@ -201,8 +217,8 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     );
   }
 
-  /** True geocentric direction on the celestial sphere. */
-  function skyPoint(lonDeg: number, latDeg: number, radius = SKY_R): THREE.Vector3 {
+  /** Ecliptic sphere (skymap). */
+  function eclipticSkyPoint(lonDeg: number, latDeg: number, radius = SKY_R): THREE.Vector3 {
     const lon = lonDeg * D2R;
     const lat = latDeg * D2R;
     const c = Math.cos(lat);
@@ -213,44 +229,77 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     );
   }
 
-  function skyVisualSize(id: BodyId): number {
-    // Angular exaggeration so outer planets remain readable on the dome.
+  /**
+   * Local sky: az clockwise from north, alt from horizon.
+   * +Y = zenith, −Z = north, +X = east.
+   */
+  function horizontalPoint(azDeg: number, altDeg: number, radius = NIGHT_R): THREE.Vector3 {
+    const az = azDeg * D2R;
+    const alt = altDeg * D2R;
+    const c = Math.cos(alt);
+    return new THREE.Vector3(
+      Math.sin(az) * c * radius,
+      Math.sin(alt) * radius,
+      -Math.cos(az) * c * radius,
+    );
+  }
+
+  function skyVisualSize(id: BodyId, night = false): number {
+    const bump = night ? 1.15 : 1;
     switch (id) {
       case 'sun':
-        return 3.2;
+        return 3.4 * bump;
       case 'moon':
-        return 2.4;
+        return 2.6 * bump;
       case 'jupiter':
-        return 2.0;
+        return 2.1 * bump;
       case 'saturn':
-        return 1.85;
+        return 1.9 * bump;
       case 'uranus':
       case 'neptune':
-        return 1.35;
+        return 1.4 * bump;
       case 'mars':
       case 'venus':
-        return 1.15;
-      case 'mercury':
-      case 'pluto':
-        return 0.95;
+        return 1.2 * bump;
       default:
-        return 1.2;
+        return 1.0 * bump;
     }
   }
 
   function applyCameraForMode(): void {
-    if (mode === 'sky') {
-      // From above: north ecliptic pole looking down on the sky map
+    nightHemi.visible = mode === 'night';
+    key.intensity = mode === 'night' ? 0.35 : 2.4;
+    fill.intensity = mode === 'night' ? 0.12 : 0.28;
+    rim.visible = mode !== 'night';
+
+    if (mode === 'night') {
+      controls.enabled = false;
+      camera.fov = 72;
+      camera.near = 0.05;
+      camera.far = 400;
+      camera.updateProjectionMatrix();
+      camera.position.set(0, 1.65, 0);
+      camera.rotation.order = 'YXZ';
+      applyNightLook();
+      scene.fog = new THREE.FogExp2('#06080c', 0.0015);
+      scene.background = new THREE.Color('#05070b');
+    } else if (mode === 'skymap') {
+      controls.enabled = true;
       camera.position.set(0.01, SKY_R * 1.9, 0.01);
       controls.target.set(0, 0, 0);
       controls.minDistance = 8;
       controls.maxDistance = SKY_R * 3.2;
-      controls.maxPolarAngle = Math.PI; // free look
+      controls.maxPolarAngle = Math.PI;
       controls.minPolarAngle = 0;
       camera.fov = 48;
+      camera.near = 0.1;
+      camera.far = 600;
       camera.updateProjectionMatrix();
+      camera.rotation.set(0, 0, 0);
       scene.fog = new THREE.FogExp2('#080a0e', 0.0022);
+      scene.background = new THREE.Color('#080a0e');
     } else {
+      controls.enabled = true;
       camera.position.set(0, 48, 105);
       controls.target.set(0, 0, 0);
       controls.minDistance = 10;
@@ -258,34 +307,111 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       controls.maxPolarAngle = Math.PI * 0.48;
       controls.minPolarAngle = 0;
       camera.fov = 42;
+      camera.near = 0.1;
+      camera.far = 600;
       camera.updateProjectionMatrix();
+      camera.rotation.set(0, 0, 0);
       scene.fog = new THREE.FogExp2('#080a0e', 0.0038);
+      scene.background = new THREE.Color('#080a0e');
     }
     controls.update();
+  }
+
+  function applyNightLook(): void {
+    // Clamp pitch: can look a bit below horizon, not behind head
+    lookPitch = Math.max(-0.15, Math.min(Math.PI / 2 - 0.05, lookPitch));
+    camera.position.set(0, 1.65, 0);
+    camera.rotation.order = 'YXZ';
+    camera.rotation.y = lookYaw;
+    camera.rotation.x = lookPitch;
+    camera.rotation.z = 0;
   }
 
   function setViewMode(next: ViewMode): void {
     if (mode === next) return;
     mode = next;
     orreryGuides.visible = mode === 'orrery';
-    skyGuides.visible = mode === 'sky';
+    skymapGuides.visible = mode === 'skymap';
+    nightGuides.visible = mode === 'night';
     applyCameraForMode();
-    if (lastSamples.length) place(lastSamples);
+    if (lastSamples.length) place(lastSamples, lastHorizon);
     if (lastHits.length || lastEnabled.size) drawAspects(lastHits, lastEnabled);
   }
 
-  function place(samples: Sample[]): void {
+  function place(samples: Sample[], horizon: HorizonSample[] = []): void {
     lastSamples = samples;
+    lastHorizon = horizon;
     anchors.clear();
 
     const earth = nodes.get('earth');
     const earthLab = labels.get('earth');
 
-    if (mode === 'sky') {
-      // Observer at center — hide Earth mesh; sky is outward directions
-      if (earth) {
-        earth.visible = false;
+    if (mode === 'night') {
+      if (earth) earth.visible = false;
+      if (earthLab) earthLab.visible = false;
+
+      // Hide all first, then show horizon samples
+      for (const [, node] of nodes) {
+        if (node.name !== 'earth') node.visible = false;
       }
+      for (const [, lab] of labels) lab.visible = false;
+
+      for (const h of horizon) {
+        const node = nodes.get(h.id);
+        const lab = labels.get(h.id);
+        if (!node) continue;
+
+        // Dim / hide bodies well below horizon
+        if (h.alt < -8) {
+          node.visible = false;
+          if (lab) lab.visible = false;
+          continue;
+        }
+
+        node.visible = true;
+        const p = horizontalPoint(h.az, h.alt);
+        node.position.copy(p);
+        anchors.set(h.id, p.clone());
+        node.lookAt(0, 1.65, 0);
+
+        const vis = skyVisualSize(h.id, true);
+        const base = baseSize.get(h.id) ?? 1;
+        node.scale.setScalar(vis / base);
+
+        // Fade near/below horizon
+        const mat = meshes.get(h.id)?.material as THREE.MeshStandardMaterial | undefined;
+        if (mat) {
+          mat.transparent = h.alt < 5;
+          mat.opacity = h.alt < 0 ? 0.25 : h.alt < 5 ? 0.55 + h.alt * 0.09 : 1;
+        }
+
+        if (lab) {
+          lab.visible = true;
+          const status = h.aboveHorizon ? '' : ' (set)';
+          updateLabel(lab, `${h.label}  ${formatLonShort(h.lon)}${status}`);
+          const outward = p.clone().normalize().multiplyScalar(NIGHT_R + vis * 1.5 + 3);
+          lab.position.copy(outward);
+          lab.scale.set(14, 1.6, 1);
+        }
+
+        if (h.id === 'sun') {
+          key.position.copy(p).normalize().multiplyScalar(40);
+          key.intensity = h.aboveHorizon ? 1.2 : 0.2;
+        }
+        if (focusId === h.id) focusTarget.copy(p);
+      }
+      return;
+    }
+
+    // Restore materials opacity for non-night
+    for (const [, mesh] of meshes) {
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      mat.transparent = false;
+      mat.opacity = 1;
+    }
+
+    if (mode === 'skymap') {
+      if (earth) earth.visible = false;
       if (earthLab) earthLab.visible = false;
 
       for (const s of samples) {
@@ -293,41 +419,34 @@ export function createWorld(canvas: HTMLCanvasElement): World {
         const lab = labels.get(s.id);
         if (!node) continue;
         node.visible = true;
-        const p = skyPoint(s.lon, s.lat);
+        const p = eclipticSkyPoint(s.lon, s.lat);
         node.position.copy(p);
         anchors.set(s.id, p.clone());
-
-        // Face mesh toward center so we see the "disk" of the planet
         node.lookAt(0, 0, 0);
 
         const vis = skyVisualSize(s.id);
         const base = baseSize.get(s.id) ?? 1;
-        const scale = vis / base;
-        node.scale.setScalar(scale);
+        node.scale.setScalar(vis / base);
 
         if (lab) {
           lab.visible = true;
           updateLabel(lab, `${s.label}  ${formatLonShort(s.lon)}`);
-          // Offset label slightly outward from sphere
-          const outward = p.clone().normalize().multiplyScalar(SKY_R + vis * 1.4 + 2);
-          lab.position.copy(outward);
+          lab.position.copy(p.clone().normalize().multiplyScalar(SKY_R + vis * 1.4 + 2));
           lab.scale.set(12, 1.5, 1);
         }
-
-        if (s.id === 'sun') {
-          key.position.copy(p).normalize().multiplyScalar(90);
-        }
+        if (s.id === 'sun') key.position.copy(p).normalize().multiplyScalar(90);
         if (focusId === s.id) focusTarget.copy(p);
       }
       return;
     }
 
-    // Orrery mode
+    // Orrery
     if (earth) {
       earth.visible = true;
       earth.position.set(0, 0, 0);
       earth.scale.setScalar(1);
-      earth.rotation.set(0, earth.rotation.y, 0);
+      earth.rotation.x = 0;
+      earth.rotation.z = 0;
       anchors.set('earth', earth.position.clone());
     }
     if (earthLab) {
@@ -344,7 +463,6 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       if (!spec || !node) continue;
       node.visible = true;
       node.scale.setScalar(1);
-      // Reset lookAt from sky mode
       node.rotation.x = 0;
       node.rotation.z = 0;
 
@@ -376,6 +494,8 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       }
     }
 
+    const sphereR = mode === 'night' ? NIGHT_R : mode === 'skymap' ? SKY_R : 0;
+
     for (const hit of hits) {
       if (!enabled.has(hit.kind)) continue;
       const a = anchors.get(hit.aId);
@@ -386,7 +506,7 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       const baseOp = 0.32 + 0.58 * hit.tightness;
 
       const pts =
-        mode === 'sky' ? greatCircle(a, b, SKY_R, 40) : [a.clone(), b.clone()];
+        sphereR > 0 ? greatCircle(a, b, sphereR, 40) : [a.clone(), b.clone()];
 
       const line = new THREE.Line(
         new THREE.BufferGeometry().setFromPoints(pts),
@@ -401,11 +521,11 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       aspectRoot.add(line);
 
       const mid =
-        mode === 'sky'
-          ? greatCircle(a, b, SKY_R, 2)[1]
+        sphereR > 0
+          ? greatCircle(a, b, sphereR, 2)[1]
           : a.clone().lerp(b, 0.5).add(new THREE.Vector3(0, 0.28, 0));
       const bead = new THREE.Mesh(
-        new THREE.SphereGeometry(mode === 'sky' ? 0.45 : 0.17, 8, 8),
+        new THREE.SphereGeometry(sphereR > 0 ? 0.5 : 0.17, 8, 8),
         new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0 }),
       );
       bead.position.copy(mid);
@@ -424,7 +544,16 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       return;
     }
     const node = nodes.get(id);
-    if (node && node.visible) focusTarget.copy(node.position);
+    if (node && node.visible) {
+      focusTarget.copy(node.position);
+      if (mode === 'night') {
+        // Point look toward body
+        const dir = node.position.clone().sub(new THREE.Vector3(0, 1.65, 0)).normalize();
+        lookYaw = Math.atan2(dir.x, -dir.z);
+        lookPitch = Math.asin(Math.max(-0.15, Math.min(0.99, dir.y)));
+        applyNightLook();
+      }
+    }
   }
 
   function pick(clientX: number, clientY: number): BodyId | null {
@@ -450,6 +579,47 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     renderer.setSize(w, h, false);
   }
 
+  // Night-sky drag-to-look
+  let dragging = false;
+  let lastX = 0;
+  let lastY = 0;
+  canvas.addEventListener('pointerdown', (e) => {
+    if (mode !== 'night') return;
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (mode !== 'night' || !dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    lookYaw -= dx * 0.0045;
+    lookPitch -= dy * 0.0045;
+    applyNightLook();
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    if (mode !== 'night') return;
+    dragging = false;
+    try {
+      canvas.releasePointerCapture(e.pointerId);
+    } catch {
+      /* ignore */
+    }
+  });
+  canvas.addEventListener(
+    'wheel',
+    (e) => {
+      if (mode !== 'night') return;
+      e.preventDefault();
+      camera.fov = Math.max(35, Math.min(100, camera.fov + e.deltaY * 0.03));
+      camera.updateProjectionMatrix();
+    },
+    { passive: false },
+  );
+
   function tick(): void {
     const spin = reduced ? 0 : 1;
     if (mode === 'orrery') {
@@ -458,8 +628,12 @@ export function createWorld(canvas: HTMLCanvasElement): World {
       }
     }
 
-    if (focusId) {
+    if (focusId && mode !== 'night') {
       controls.target.lerp(focusTarget, reduced ? 1 : 0.08);
+    }
+
+    if (mode === 'night') {
+      applyNightLook();
     }
 
     if (bloom < bloomGoal) {
@@ -474,13 +648,10 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     }
 
     for (const [id, mesh] of meshes) {
-      const boost = id === focusId ? 1.1 : 1;
-      // node scale is set in place(); multiply mesh only for highlight in orrery
-      if (mode === 'orrery') mesh.scale.setScalar(boost);
-      else mesh.scale.setScalar(boost);
+      mesh.scale.setScalar(id === focusId ? 1.1 : 1);
     }
 
-    controls.update();
+    if (mode !== 'night') controls.update();
     renderer.render(scene, camera);
     frameCount++;
     const now = performance.now();
@@ -504,6 +675,12 @@ export function createWorld(canvas: HTMLCanvasElement): World {
     getViewMode: () => mode,
     focusBody,
     pick,
+    getLook: () => ({ yaw: lookYaw, pitch: lookPitch }),
+    setLook: (yaw, pitch) => {
+      lookYaw = yaw;
+      lookPitch = pitch;
+      if (mode === 'night') applyNightLook();
+    },
     resize,
     tick,
     dispose,
@@ -511,39 +688,36 @@ export function createWorld(canvas: HTMLCanvasElement): World {
   };
 }
 
-/** Slerp along great circle on sphere of radius R. */
 function greatCircle(a: THREE.Vector3, b: THREE.Vector3, R: number, segs: number): THREE.Vector3[] {
   const aN = a.clone().normalize();
   const bN = b.clone().normalize();
-  let dot = aN.dot(bN);
-  dot = Math.min(1, Math.max(-1, dot));
+  let dot = Math.min(1, Math.max(-1, aN.dot(bN)));
   const omega = Math.acos(dot);
   const pts: THREE.Vector3[] = [];
-
   if (omega < 1e-4) {
     pts.push(aN.multiplyScalar(R));
     return pts;
   }
-
   const sinO = Math.sin(omega);
   for (let i = 0; i <= segs; i++) {
     const t = i / segs;
-    const p = aN
-      .clone()
-      .multiplyScalar(Math.sin((1 - t) * omega) / sinO)
-      .add(bN.clone().multiplyScalar(Math.sin(t * omega) / sinO))
-      .normalize()
-      .multiplyScalar(R);
-    pts.push(p);
+    pts.push(
+      aN
+        .clone()
+        .multiplyScalar(Math.sin((1 - t) * omega) / sinO)
+        .add(bN.clone().multiplyScalar(Math.sin(t * omega) / sinO))
+        .normalize()
+        .multiplyScalar(R),
+    );
   }
   return pts;
 }
 
 function starfield(): THREE.Points {
-  const n = 2800;
+  const n = 3200;
   const pos = new Float32Array(n * 3);
   for (let i = 0; i < n; i++) {
-    const r = 190 + Math.random() * 140;
+    const r = 200 + Math.random() * 150;
     const theta = Math.random() * Math.PI * 2;
     const phi = Math.acos(2 * Math.random() - 1);
     pos[i * 3] = r * Math.sin(phi) * Math.cos(theta);
@@ -556,10 +730,10 @@ function starfield(): THREE.Points {
     geo,
     new THREE.PointsMaterial({
       color: '#c8d0dc',
-      size: 0.32,
+      size: 0.3,
       sizeAttenuation: true,
       transparent: true,
-      opacity: 0.74,
+      opacity: 0.78,
       depthWrite: false,
     }),
   );
@@ -589,16 +763,9 @@ function goldRing(radius: number): THREE.Line {
   );
 }
 
-/** Faint latitude/longitude grid on the celestial sphere. */
 function skyDome(R: number): THREE.Group {
   const g = new THREE.Group();
-  const mat = new THREE.LineBasicMaterial({
-    color: '#1e2a3a',
-    transparent: true,
-    opacity: 0.35,
-  });
-
-  // parallels (latitude)
+  const mat = new THREE.LineBasicMaterial({ color: '#1e2a3a', transparent: true, opacity: 0.35 });
   for (const lat of [-60, -30, 0, 30, 60]) {
     const pts: THREE.Vector3[] = [];
     const latR = lat * D2R;
@@ -610,46 +777,97 @@ function skyDome(R: number): THREE.Group {
     }
     g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat));
   }
-
-  // meridians every 30°
   for (let lon = 0; lon < 360; lon += 30) {
     const pts: THREE.Vector3[] = [];
     const L = lon * D2R;
     for (let i = 0; i <= 64; i++) {
       const lat = (-90 + (180 * i) / 64) * D2R;
       const c = Math.cos(lat);
-      pts.push(
-        new THREE.Vector3(c * Math.cos(L) * R, Math.sin(lat) * R, c * Math.sin(L) * R),
-      );
+      pts.push(new THREE.Vector3(c * Math.cos(L) * R, Math.sin(lat) * R, c * Math.sin(L) * R));
     }
     g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat.clone()));
   }
-
   return g;
 }
 
-/** 0° / 90° / 180° / 270° meridians slightly brighter. */
-function meridianRing(R: number): THREE.Line {
+function groundDisc(R: number): THREE.Mesh {
+  const mesh = new THREE.Mesh(
+    new THREE.CircleGeometry(R, 64),
+    new THREE.MeshBasicMaterial({
+      color: '#040506',
+      side: THREE.DoubleSide,
+      transparent: true,
+      opacity: 0.92,
+    }),
+  );
+  mesh.rotation.x = -Math.PI / 2;
+  mesh.position.y = -0.05;
+  return mesh;
+}
+
+function horizonRing(R: number): THREE.Line {
   const pts: THREE.Vector3[] = [];
-  for (let i = 0; i <= 64; i++) {
-    const lat = (-90 + (180 * i) / 64) * D2R;
-    pts.push(new THREE.Vector3(0, Math.sin(lat) * R, Math.cos(lat) * R));
+  for (let i = 0; i <= 180; i++) {
+    const a = (i / 180) * Math.PI * 2;
+    pts.push(new THREE.Vector3(Math.sin(a) * R, 0.02, -Math.cos(a) * R));
   }
   return new THREE.Line(
     new THREE.BufferGeometry().setFromPoints(pts),
-    new THREE.LineBasicMaterial({ color: '#2a3a50', transparent: true, opacity: 0.45 }),
+    new THREE.LineBasicMaterial({ color: '#c9a227', transparent: true, opacity: 0.45 }),
   );
+}
+
+function cardinalLabels(R: number): THREE.Group {
+  const g = new THREE.Group();
+  const marks: [string, number][] = [
+    ['N', 0],
+    ['E', 90],
+    ['S', 180],
+    ['W', 270],
+  ];
+  for (const [name, az] of marks) {
+    const a = az * D2R;
+    const spr = nameSprite(name);
+    spr.position.set(Math.sin(a) * R * 0.92, 1.2, -Math.cos(a) * R * 0.92);
+    spr.scale.set(8, 1.4, 1);
+    g.add(spr);
+  }
+  return g;
+}
+
+function altitudeArcs(R: number): THREE.Group {
+  const g = new THREE.Group();
+  const mat = new THREE.LineBasicMaterial({ color: '#1a2838', transparent: true, opacity: 0.4 });
+  // Meridian N-S through zenith
+  const meridian: THREE.Vector3[] = [];
+  for (let i = 0; i <= 64; i++) {
+    const alt = (-5 + (95 * i) / 64) * D2R;
+    meridian.push(new THREE.Vector3(0, Math.sin(alt) * R, -Math.cos(alt) * R));
+  }
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(meridian), mat));
+  // 30° / 60° altitude rings
+  for (const altDeg of [30, 60]) {
+    const pts: THREE.Vector3[] = [];
+    const alt = altDeg * D2R;
+    const y = Math.sin(alt) * R;
+    const rr = Math.cos(alt) * R;
+    for (let i = 0; i <= 96; i++) {
+      const a = (i / 96) * Math.PI * 2;
+      pts.push(new THREE.Vector3(Math.sin(a) * rr, y, -Math.cos(a) * rr));
+    }
+    g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), mat.clone()));
+  }
+  return g;
 }
 
 function zodiacTicks(R: number): THREE.Object3D[] {
   const signs = ['♈', '♉', '♊', '♋', '♌', '♍', '♎', '♏', '♐', '♑', '♒', '♓'];
   const out: THREE.Object3D[] = [];
   for (let i = 0; i < 12; i++) {
-    const lon = i * 30 + 15; // mid-sign
+    const lon = i * 30 + 15;
     const a = lon * D2R;
-    const p = new THREE.Vector3(Math.cos(a) * R, 0.5, Math.sin(a) * R);
     const spr = nameSprite(signs[i]);
-    spr.position.copy(p);
+    spr.position.set(Math.cos(a) * R, 0.5, Math.sin(a) * R);
     spr.scale.set(5, 1.2, 1);
     out.push(spr);
   }

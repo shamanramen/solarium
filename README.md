@@ -12,7 +12,10 @@ Fresh walking skeleton: 3D solar system + classical aspect theater.
 - Major aspects with orb + applying/separating  
 - Time: Now, datetime, ±1d/±1m, scrub ±1 year  
 - Focus body (click or chip list) · aspect hit detail  
-- **View modes:** Orrery (readable rings) · **From Earth** (sky directions on celestial sphere, default look-down from above)  
+- **View modes:**
+  - **Orrery** — readable rings, top-down system  
+  - **Sky map** — celestial sphere by geo lon/lat, look down from north ecliptic pole  
+  - **Night sky** — standing on Earth, real local alt/az, drag to look around  
 - No natal form, no VR, no Asteria monorepo, no auth  
 
 ## Stack

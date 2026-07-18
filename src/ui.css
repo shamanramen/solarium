@@ -139,6 +139,40 @@ body {
   margin-bottom: 0.45rem;
 }
 
+.view-toggle.three {
+  grid-template-columns: 1fr 1fr 1fr;
+}
+
+.view-toggle.three .view-btn {
+  font-size: 0.72rem;
+  padding: 0.4rem 0.25rem;
+}
+
+.observer-fields {
+  margin-top: 0.65rem;
+  padding-top: 0.55rem;
+  border-top: 1px solid oklch(0.3 0.015 250 / 0.45);
+}
+
+.observer-fields[hidden] {
+  display: none !important;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.field.half input {
+  width: 100%;
+}
+
+#obs-readout {
+  margin: 0.4rem 0 0;
+}
+
 .view-btn {
   font-family: var(--ui);
   font-size: 0.8rem;
